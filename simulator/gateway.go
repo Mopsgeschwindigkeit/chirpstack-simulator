@@ -320,7 +320,7 @@ func (g *Gateway) downlinkEventHandler(c mqtt.Client, msg mqtt.Message) {
 	log.WithFields(log.Fields{
 		"gateway_id": g.gatewayID,
 		"topic":      msg.Topic(),
-	}).Debug("simulator: downlink command received")
+	}).Info("simulator: downlink command received")
 
 	gatewayDownlinkCounter().Inc()
 

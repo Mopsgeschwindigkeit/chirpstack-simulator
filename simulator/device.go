@@ -99,10 +99,22 @@ type Device struct {
 	uplinkTXInfo gw.UplinkTXInfo
 
 	// Downlink handler function.
-	downlinkHandlerFunc func(confirmed, ack bool, fCntDown uint32, fPort uint8, data []byte) error
+	downlinkHandlerFunc func(devEUI string, confirmed, ack bool, fCntDown uint32, fPort uint8, data []byte) error
+
+	uplincFunc func(devEUI string) ([]byte, uint8, error)
 
 	// OTAA delay.
 	otaaDelay time.Duration
+
+	currentUplink int
+}
+
+// WithAppKey sets the AppKey.
+func WithUplinkFunc(uplincFunc func(devEUI string) ([]byte, uint8, error)) DeviceOption {
+	return func(d *Device) error {
+		d.uplincFunc = uplincFunc
+		return nil
+	}
 }
 
 // WithAppKey sets the AppKey.
@@ -194,7 +206,7 @@ func WithUplinkTXInfo(txInfo gw.UplinkTXInfo) DeviceOption {
 }
 
 // WithDownlinkHandlerFunc sets the downlink handler func.
-func WithDownlinkHandlerFunc(f func(confirmed, ack bool, fCntDown uint32, fPort uint8, data []byte) error) DeviceOption {
+func WithDownlinkHandlerFunc(f func(devEUI string, confirmed, ack bool, fCntDown uint32, fPort uint8, data []byte) error) DeviceOption {
 	return func(d *Device) error {
 		d.downlinkHandlerFunc = f
 		return nil
@@ -212,7 +224,10 @@ func NewDevice(ctx context.Context, wg *sync.WaitGroup, opts ...DeviceOption) (*
 
 		downlinkFrames: make(chan gw.DownlinkFrame, 100),
 		state:          deviceStateOTAA,
+		currentUplink:  0,
 	}
+
+	d.uplincFunc = func(devEUI string) ([]byte, uint8, error) { return d.payload, d.fPort, nil }
 
 	for _, o := range opts {
 		if err := o(d); err != nil {
@@ -276,7 +291,7 @@ func (d *Device) uplinkLoop() {
 func (d *Device) downlinkLoop() {
 	defer d.cancel()
 	defer d.wg.Done()
-
+	fmt.Println("start downlinkLoop!")
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -348,6 +363,27 @@ func (d *Device) dataUp() {
 		mType = lorawan.ConfirmedDataUp
 	}
 
+	data, port, err := d.uplincFunc(d.devEUI.String())
+	if err != nil {
+		log.WithError(err).Error("simulator: cannot send uplink (")
+		return
+	}
+	if data == nil {
+		log.Info("no data to send")
+		return
+	}
+	log.WithField("data", data).WithField("port", port).Info("send packet")
+	portPtr := &port
+
+	frmPayload := []lorawan.Payload{
+		&lorawan.DataPayload{
+			Bytes: data,
+		},
+	}
+	if port == 0 {
+		portPtr = nil
+		frmPayload = []lorawan.Payload{}
+	}
 	phy := lorawan.PHYPayload{
 		MHDR: lorawan.MHDR{
 			MType: mType,
@@ -361,12 +397,8 @@ func (d *Device) dataUp() {
 					ADR: false,
 				},
 			},
-			FPort: &d.fPort,
-			FRMPayload: []lorawan.Payload{
-				&lorawan.DataPayload{
-					Bytes: d.payload,
-				},
-			},
+			FPort:      portPtr,
+			FRMPayload: frmPayload,
 		},
 	}
 
@@ -496,7 +528,7 @@ func (d *Device) downlinkData(phy lorawan.PHYPayload) error {
 		return nil
 	}
 
-	return d.downlinkHandlerFunc(phy.MHDR.MType == lorawan.ConfirmedDataDown, macPL.FHDR.FCtrl.ACK, d.fCntDown, fPort, data)
+	return d.downlinkHandlerFunc(d.devEUI.String(), phy.MHDR.MType == lorawan.ConfirmedDataDown, macPL.FHDR.FCtrl.ACK, d.fCntDown, fPort, data)
 }
 
 // sendUplink sends
