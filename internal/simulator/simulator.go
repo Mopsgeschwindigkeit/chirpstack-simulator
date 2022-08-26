@@ -403,7 +403,7 @@ func (s *simulation) tearDownDeviceProfile() error {
 func (s *simulation) setupApplication() error {
 	log.Info("simulator: init application")
 	mrand.Seed(time.Now().UTC().UnixNano())
-	appName := fmt.Sprintf("loadtest_%d", mrand.Intn(1000000))
+	appName := fmt.Sprintf("simulator_%d", mrand.Intn(1000000))
 
 	createAppResp, err := as.Application().Create(context.Background(), &api.CreateApplicationRequest{
 		Application: &api.Application{
