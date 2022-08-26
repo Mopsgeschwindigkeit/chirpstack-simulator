@@ -10,3 +10,5 @@ RUN apk add --no-cache ca-certificates tzdata make git bash
 RUN mkdir -p $PROJECT_PATH
 COPY . $PROJECT_PATH
 WORKDIR $PROJECT_PATH
+RUN make build
+CMD ["./build/chirpstack-simulator", "-c", "/etc/chirpstack-simulator/chirpstack-simulator.toml"]
