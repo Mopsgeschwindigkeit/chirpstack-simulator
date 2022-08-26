@@ -51,8 +51,8 @@ class Device:
 @click.option('--reset', default="latest", help='offset-reset')
 @click.option('--from_beginning', is_flag=True, default=False, help="start from beginning, alias for --reset earliest --consumer-group [random]")
 @click.option('--consumer-group', default=None)
-@click.option('--bootstrap-server', default="localhost:29092")
-@click.option('--schema-registry', default='http://localhost:8081')
+@click.option('--bootstrap-server', default="bootstrap:9092")
+@click.option('--schema-registry', default='http://avro-schemas:32406')
 @click.argument('topics', default=["dev_object_beehive_midi_upload"])
 def consumer(reset, consumer_group,  bootstrap_server,
              schema_registry, from_beginning, topics):
