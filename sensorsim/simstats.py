@@ -51,9 +51,9 @@ class Device:
 @click.option('--reset', default="latest", help='offset-reset')
 @click.option('--from_beginning', is_flag=True, default=False, help="start from beginning, alias for --reset earliest --consumer-group [random]")
 @click.option('--consumer-group', default=None)
-@click.option('--bootstrap-server', default="bootstrap:9092")
-@click.option('--schema-registry', default='http://avro-schemas:32406')
-@click.argument('topics', default=["dev_object_beehive_midi_upload"])
+@click.option('--bootstrap-server', default="simulator-bootstrap:9092")
+@click.option('--schema-registry', default='http://simulator-avro-schemas:32406')
+@click.argument('topics', default="simulator_object_beehive_midi_upload")
 def consumer(reset, consumer_group,  bootstrap_server,
              schema_registry, from_beginning, topics):
     last_run = None
@@ -92,8 +92,7 @@ def consumer(reset, consumer_group,  bootstrap_server,
         device_id = key["id"]
         if value["fPort"] in (1,2):
 
-            fid = int(base64.b64decode(value["data"])[0:1].hex(), 16)
-
+            fid = int(base64.b64decode(value["data"])[0:1].encode('hex'), 16)
 
             if device_id not in devices:
                 devices[device_id] = Device(device_id)
