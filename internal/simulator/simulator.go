@@ -3,14 +3,19 @@ package simulator
 import (
 	"context"
 	"crypto/rand"
+	b64 "encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	mrand "math/rand"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gofrs/uuid"
@@ -26,6 +31,12 @@ import (
 	"github.com/brocaar/chirpstack-simulator/simulator"
 	"github.com/brocaar/lorawan"
 )
+
+func deepCopy(s string) string {
+	b := make([]byte, len(s))
+	copy(b, s)
+	return *(*string)(unsafe.Pointer(&b))
+}
 
 // Start starts the simulator.
 func Start(ctx context.Context, wg *sync.WaitGroup, c config.Config) error {
@@ -213,13 +224,44 @@ func (s *simulation) runSimulation() error {
 			gws = append(gws, devGateways[k])
 		}
 
+		var netClient = &http.Client{
+			Timeout: time.Second * 10,
+		}
+
 		d, err := simulator.NewDevice(ctx, &wg,
 			simulator.WithDevEUI(devEUI),
 			simulator.WithAppKey(appKey),
 			simulator.WithUplinkInterval(s.uplinkInterval),
 			simulator.WithOTAADelay(time.Duration(mrand.Int63n(int64(s.activationTime)))),
-			simulator.WithUplinkPayload(false, s.fPort, s.payload),
+			simulator.WithUplinkPayload(false, s.fPort, []byte(devEUI.String())),
 			simulator.WithGateways(gws),
+			simulator.WithDownlinkHandlerFunc(func(devEUI string, confirmed, ack bool, fCntDown uint32, fPort uint8, data []byte) error {
+				_, err := netClient.Get("http://localhost:8666/downlink?deveui=" + devEUI +
+					"&data=" + url.QueryEscape(b64.StdEncoding.EncodeToString(data)) + "&fPort=" + fmt.Sprint(fPort) + "&fCntDown=" + fmt.Sprint(fCntDown))
+				if err != nil {
+					log.Warnf("get downlink error", err)
+				}
+
+				return nil
+			}),
+			simulator.WithUplinkFunc(func(devEUI string) ([]byte, uint8, error) {
+				log.Infof("uplink func for %s", devEUI)
+				resp, err := netClient.Get("http://localhost:8666/uplink?deveui=" + devEUI)
+				if err != nil {
+					return nil, 10, err
+				}
+
+				defer resp.Body.Close()
+
+				body, _ := io.ReadAll(resp.Body)
+				log.Infof("uplink func body %s ", body)
+				if len(body) == 0 {
+					return body, 10, errors.New("no data to send")
+				}
+
+				return body[1:], body[0], err
+			}),
+
 			simulator.WithUplinkTXInfo(gw.UplinkTXInfo{
 				Frequency:  uint32(s.frequency),
 				Modulation: common.Modulation_LORA,
@@ -279,7 +321,7 @@ func (s *simulation) setupGateways() error {
 		if _, err := rand.Read(gatewayID[:]); err != nil {
 			return errors.Wrap(err, "read random bytes error")
 		}
-
+		log.Info("simulator: creating gateway")
 		_, err := as.Gateway().Create(context.Background(), &api.CreateGatewayRequest{
 			Gateway: &api.Gateway{
 				Id:              gatewayID.String(),
@@ -358,16 +400,13 @@ func (s *simulation) tearDownDeviceProfile() error {
 
 func (s *simulation) setupApplication() error {
 	log.Info("simulator: init application")
-
-	appName, err := uuid.NewV4()
-	if err != nil {
-		return err
-	}
+	mrand.Seed(time.Now().UTC().UnixNano())
+	appName := fmt.Sprintf("loadtest_%d", mrand.Intn(1000000))
 
 	createAppResp, err := as.Application().Create(context.Background(), &api.CreateApplicationRequest{
 		Application: &api.Application{
-			Name:             appName.String(),
-			Description:      appName.String(),
+			Name:             appName,
+			Description:      appName,
 			OrganizationId:   s.serviceProfile.OrganizationId,
 			ServiceProfileId: s.serviceProfile.Id,
 		},
@@ -411,6 +450,7 @@ func (s *simulation) setupDevices() error {
 				DevEui:          devEUI.String(),
 				Name:            devEUI.String(),
 				Description:     devEUI.String(),
+				SkipFCntCheck:   true,
 				ApplicationId:   s.applicationID,
 				DeviceProfileId: s.deviceProfileID.String(),
 			},
